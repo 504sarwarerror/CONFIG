@@ -64,13 +64,15 @@ require("lazy").setup({
         return
       end
       wk.setup({})
-      -- Register some leader shortcuts for discoverability
-      wk.register({
-        f = { name = 'file' },
-        g = { name = 'git' },
-        d = { name = 'debug' },
-        o = { name = 'opencode' },
-      }, { prefix = '<leader>' })
+      -- Register leader groups using the NEW spec format
+      wk.add({
+        { "<leader>d", group = "diff" },
+        { "<leader>f", group = "file" },
+        { "<leader>g", group = "git" },
+        { "<leader>h", group = "hop" },
+        { "<leader>o", group = "opencode" },
+        { "<leader>p", group = "project" },
+      })
     end,
   },
 
@@ -139,6 +141,11 @@ require("lazy").setup({
   -- Better notifications
   { 'rcarriga/nvim-notify' },
 
+  -- Optional icons provider to satisfy which-key healthcheck
+  { 'echasnovski/mini.icons', branch = 'main' },
+
+  -- Inline image preview plugin removed per user request
+
   -- Modern indent guides (replaces indentLine)
   { 'lukas-reineke/indent-blankline.nvim' },
 
@@ -162,7 +169,7 @@ require("lazy").setup({
   { 'justinmk/vim-sneak' },
 
   -- Harpoon - Quick file navigation (mark important files)
-  { 'ThePrimeagen/harpoon' },
+  -- Harpoon plugin removed per user request
 
   -- === AI DIFF VISUALIZATION (No build required!) ===
   -- diffview.nvim - Shows git diffs and AI changes side-by-side
@@ -194,11 +201,12 @@ require("lazy").setup({
     'folke/drop.nvim',
     -- Load on demand (no automatic show at startup)
     opts = {
-      theme = "binary",
+      theme = "matrix",
       max = 75,
       interval = 100,
       screensaver = 1000 * 60 * 5,
-      filetypes = { "dashboard", "alpha", "ministarter" },
+        -- Do not auto-show on startup based on filetype. Load/show manually via keymaps.
+        filetypes = {},
       winblend = 0,
     },
   },
@@ -595,9 +603,7 @@ end
 -- Vim-sneak configuration
 vim.g['sneak#label'] = 1  -- Label mode for easier targeting
 
--- Harpoon - Quick file marking and navigation
-local ok_harpoon_mark, harpoon_mark = pcall(require, "harpoon.mark")
-local ok_harpoon_ui, harpoon_ui = pcall(require, "harpoon.ui")
+-- Harpoon keymaps removed per user request
 
 -- GitHub Copilot & CMP Configuration
 -- GitHub Copilot & CMP Configuration
@@ -714,7 +720,8 @@ vim.keymap.set('n', '<leader>e', ':NERDTreeToggle<CR>', { noremap = true, silent
 
 -- Fuzzy File Finder
 vim.keymap.set('n', '<C-p>', ':Files<CR>', { noremap = true, silent = true })
-vim.keymap.set('n', '<leader>p', ':Files<CR>', { noremap = true, silent = true })
+-- Move direct <leader>p mapping to <leader>pp to avoid prefix conflicts with other <leader>p* mappings
+vim.keymap.set('n', '<leader>pp', ':Files<CR>', { noremap = true, silent = true, desc = 'FZF: Files' })
 
 -- Quick save and quit
 vim.keymap.set('n', '<leader>w', ':w<CR>', { noremap = true, silent = true })
@@ -735,15 +742,7 @@ vim.keymap.set('n', '<leader>hp', ':HopPattern<CR>', { noremap = true, silent = 
 
 
 
--- Harpoon keymaps (Quick file marking)
-vim.keymap.set('n', '<leader>m', function() require("harpoon.mark").add_file() end, { noremap = true, silent = true, desc = "Harpoon Mark File" })
-vim.keymap.set('n', '<leader>hm', function() require("harpoon.ui").toggle_quick_menu() end, { noremap = true, silent = true, desc = "Harpoon Menu" })
-vim.keymap.set('n', '<leader>1', function() require("harpoon.ui").nav_file(1) end, { noremap = true, silent = true, desc = "Harpoon File 1" })
-vim.keymap.set('n', '<leader>2', function() require("harpoon.ui").nav_file(2) end, { noremap = true, silent = true, desc = "Harpoon File 2" })
-vim.keymap.set('n', '<leader>3', function() require("harpoon.ui").nav_file(3) end, { noremap = true, silent = true, desc = "Harpoon File 3" })
-vim.keymap.set('n', '<leader>4', function() require("harpoon.ui").nav_file(4) end, { noremap = true, silent = true, desc = "Harpoon File 4" })
-vim.keymap.set('n', '<C-h>', function() require("harpoon.ui").nav_prev() end, { noremap = true, silent = true, desc = "Harpoon Prev" })
-vim.keymap.set('n', '<C-l>', function() require("harpoon.ui").nav_next() end, { noremap = true, silent = true, desc = "Harpoon Next" })
+-- Harpoon keymaps removed per user request
 
 -- ============================================================================
 -- ASSEMBLY-SPECIFIC KEYMAPS
@@ -755,8 +754,8 @@ vim.keymap.set('n', '<F6>', ':!nasm -f macho64 % -o %:r.o && ld %:r.o -o %:r -lS
 vim.keymap.set('n', '<F7>', ':!lldb %:r<CR>', { noremap = true })  -- Debug with LLDB
 vim.keymap.set('n', '<F8>', ':!objdump -d %:r<CR>', { noremap = true })  -- Disassemble
 
--- Hex mode toggle
-vim.keymap.set('n', '<leader>h', ':Hexmode<CR>', { noremap = true, silent = true })
+-- Hex mode toggle (moved to avoid clashing with Hop prefix)
+vim.keymap.set('n', '<leader>hx', ':Hexmode<CR>', { noremap = true, silent = true })
 
 -- View registers (peekaboo shows when you press " or @)
 -- GitGutter navigation
@@ -808,21 +807,21 @@ vim.keymap.set('i', '<C-v>', '<C-r>+', { noremap = true, silent = true, desc = "
 vim.keymap.set('v', '<C-v>', '"+p', { noremap = true, silent = true, desc = "Paste from clipboard" })
 
 -- Drop.nvim keymaps: show, hide, toggle
-vim.keymap.set('n', '<leader>ds', function()
+vim.keymap.set('n', '<leader>pd', function()
   local ok, drop = pcall(require, 'drop')
   if ok and drop and type(drop.show) == 'function' then
     pcall(drop.show)
   end
 end, { noremap = true, silent = true, desc = 'Show Drop' })
 
-vim.keymap.set('n', '<leader>dh', function()
+vim.keymap.set('n', '<leader>ph', function()
   local ok, drop = pcall(require, 'drop')
   if ok and drop and type(drop.hide) == 'function' then
     pcall(drop.hide)
   end
 end, { noremap = true, silent = true, desc = 'Hide Drop' })
 
-vim.keymap.set('n', '<leader>dd', function()
+vim.keymap.set('n', '<leader>pt', function()
   local ok_dropdrop, dropdrop = pcall(require, 'drop.drop')
   local ok_drop, drop = pcall(require, 'drop')
   if not ok_drop or not ok_dropdrop then
