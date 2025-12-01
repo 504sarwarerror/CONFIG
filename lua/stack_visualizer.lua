@@ -58,6 +58,26 @@ local function parse_assembly(lines)
   local current_func = nil
   local line_map = {} -- Map line numbers to LIST of variables accessed
   
+  -- Map 32-bit registers to 64-bit parents
+  local reg_parents = {
+    eax="rax", ax="rax", al="rax",
+    ebx="rbx", bx="rbx", bl="rbx",
+    ecx="rcx", cx="rcx", cl="rcx",
+    edx="rdx", dx="rdx", dl="rdx",
+    esi="rsi", si="rsi", sil="rsi",
+    edi="rdi", di="rdi", dil="rdi",
+    ebp="rbp", bp="rbp", bpl="rbp",
+    esp="rsp", sp="rsp", spl="rsp",
+    r8d="r8", r8w="r8", r8b="r8",
+    r9d="r9", r9w="r9", r9b="r9",
+    r10d="r10", r10w="r10", r10b="r10",
+    r11d="r11", r11w="r11", r11b="r11",
+    r12d="r12", r12w="r12", r12b="r12",
+    r13d="r13", r13w="r13", r13b="r13",
+    r14d="r14", r14w="r14", r14b="r14",
+    r15d="r15", r15w="r15", r15b="r15",
+  }
+
   for i, line in ipairs(lines) do
     local trimmed = line:match("^%s*(.-)%s*$")
     
@@ -100,69 +120,138 @@ local function parse_assembly(lines)
         current_func.has_calls = true
       end
       
-      -- Track ALL register operations
+      -- Track ALL register operations with better context
+      
+      -- Helper to update register and optionally its parent
+      local function update_reg(reg, info)
+        if not current_func.register_usage[reg] then
+          current_func.register_usage[reg] = {operations = {}, latest = nil}
+        end
+        current_func.register_usage[reg].latest = info
+        
+        -- Propagate to parent (e.g. eax -> rax)
+        local parent = reg_parents[reg]
+        if parent then
+          if not current_func.register_usage[parent] then
+            current_func.register_usage[parent] = {operations = {}, latest = nil}
+          end
+          -- Create a copy for the parent
+          local parent_info = vim.deepcopy(info)
+          -- parent_info.display = info.display .. " (via " .. reg .. ")" -- Optional: show source
+          current_func.register_usage[parent].latest = parent_info
+        end
+      end
+      
+      -- CALL operations - track return value in rax
+      -- Case-insensitive match for 'call'
+      local call_target = trimmed:match("^[Cc][Aa][Ll][Ll]%s+(.+)")
+      if call_target then
+        -- Extract just the function name
+        -- Handle various formats: func, func(args), [func], etc.
+        local func_name = call_target:match("^([%w_@?]+)") -- Basic name
+        
+        if not func_name then
+           -- Try to handle *[name] or similar
+           func_name = call_target:match("%*?%[?([%w_@?]+)%]?")
+        end
+        
+        func_name = func_name or call_target
+        
+        -- Function calls typically return in rax (only track the full register)
+        update_reg("rax", {
+          type = "call",
+          line = i,
+          value = func_name,
+          display = func_name
+        })
+      end
+      
       -- MOV operations
       local mov_dest, mov_src = trimmed:match("mov%s+(%w+),%s*(.+)")
       if mov_dest and mov_src then
-        if not current_func.register_usage[mov_dest] then
-          current_func.register_usage[mov_dest] = {operations = {}, values = {}}
-        end
-        table.insert(current_func.register_usage[mov_dest].operations, {
-          type = "mov",
-          line = i,
-          source = mov_src
-        })
+        local display_value = mov_src
+        local value_type = "mov"
         
         -- Track if loading from stack
         local stack_offset = mov_src:match("%[rbp%-(%d+)%]")
         if stack_offset then
-          table.insert(current_func.register_usage[mov_dest].values, 
-            string.format("stack[rbp-%s]", stack_offset))
-        elseif mov_src:match("^%d+$") then
-          table.insert(current_func.register_usage[mov_dest].values, mov_src)
-        elseif mov_src:match("^[%w_]+$") and not mov_src:match("^[re]") then
-          table.insert(current_func.register_usage[mov_dest].values, mov_src)
+          display_value = string.format("[rbp-%s]", stack_offset)
+          value_type = "stack_load"
+        -- Check if moving from another register - propagate its value
+        elseif mov_src:match("^[re][abcd]x$") or mov_src:match("^r%d+[dwb]?$") or mov_src:match("^[re][abcd][xhl]$") then
+          -- Check if source register has a tracked value (like a function call result)
+          local src_reg = mov_src
+          -- Check parent of source too (e.g. if moving eax, check if rax has info)
+          local src_parent = reg_parents[src_reg]
+          
+          if current_func.register_usage[src_reg] and current_func.register_usage[src_reg].latest then
+            local src_info = current_func.register_usage[src_reg].latest
+            -- Propagate the source register's value
+            if src_info.type == "call" then
+              display_value = src_info.display
+              value_type = "call"
+            else
+              display_value = mov_src
+              value_type = "reg_move"
+            end
+          elseif src_parent and current_func.register_usage[src_parent] and current_func.register_usage[src_parent].latest then
+             -- If source is eax, and rax has info, maybe use that? 
+             -- Actually, usually we want exact match, but for "mov rax, rbx" if rbx is unknown but ebx is known...
+             -- Let's stick to direct match for now to avoid confusion.
+             display_value = mov_src
+             value_type = "reg_move"
+          else
+            display_value = mov_src
+            value_type = "reg_move"
+          end
+        -- Check for immediate values
+        elseif mov_src:match("^%d+$") or mov_src:match("^0x[%x]+$") then
+          display_value = mov_src
+          value_type = "immediate"
+        -- Memory or other
+        else
+          display_value = mov_src
+          value_type = "mov"
         end
+        
+        update_reg(mov_dest, {
+          type = value_type,
+          line = i,
+          value = mov_src,
+          display = display_value
+        })
       end
       
       -- LEA operations (register pointing to stack)
       local lea_reg, lea_offset = trimmed:match("lea%s+(%w+),%s*%[rbp%-(%d+)%]")
       if lea_reg and lea_offset then
         current_func.register_map[lea_reg] = tonumber(lea_offset)
-        if not current_func.register_usage[lea_reg] then
-          current_func.register_usage[lea_reg] = {operations = {}, values = {}}
-        end
-        table.insert(current_func.register_usage[lea_reg].operations, {
+        update_reg(lea_reg, {
           type = "lea",
           line = i,
-          target = string.format("[rbp-%s]", lea_offset)
+          value = string.format("[rbp-%s]", lea_offset),
+          display = string.format("&[rbp-%s]", lea_offset)
         })
-        table.insert(current_func.register_usage[lea_reg].values, 
-          string.format("&[rbp-%s]", lea_offset))
       end
       
       -- ADD/SUB operations
       local add_dest, add_src = trimmed:match("add%s+(%w+),%s*(.+)")
       if add_dest and add_src then
-        if not current_func.register_usage[add_dest] then
-          current_func.register_usage[add_dest] = {operations = {}, values = {}}
-        end
-        table.insert(current_func.register_usage[add_dest].operations, {
+        update_reg(add_dest, {
           type = "add",
           line = i,
-          operand = add_src
+          value = add_src,
+          display = string.format("+%s", add_src)
         })
       end
       
       local sub_dest, sub_src = trimmed:match("sub%s+(%w+),%s*(.+)")
       if sub_dest and sub_src and sub_dest ~= "rsp" then -- Ignore stack allocation
-        if not current_func.register_usage[sub_dest] then
-          current_func.register_usage[sub_dest] = {operations = {}, values = {}}
-        end
-        table.insert(current_func.register_usage[sub_dest].operations, {
+        update_reg(sub_dest, {
           type = "sub",
           line = i,
-          operand = sub_src
+          value = sub_src,
+          display = string.format("-%s", sub_src)
         })
       end
       
@@ -385,7 +474,7 @@ local function calc_height(size, max_size, num_info_lines)
 end
 
 -- Generate stack visualization lines
-local function generate_lines(functions, width, active_offsets)
+local function generate_lines(functions, width, active_offsets, cursor_line)
   local lines = {}
   local highlights = {}
   local w = math.max(40, width)
@@ -503,41 +592,121 @@ local function generate_lines(functions, width, active_offsets)
       end
     end
     
-    -- Comprehensive Register Usage Panel
-    if vim.tbl_count(func.register_usage) > 0 then
-      -- Filter out unknown values
+    -- Comprehensive Register Tracking Panel (cursor-aware)
+    if vim.tbl_count(func.register_usage) > 0 and cursor_line then
+      -- Collect all registers with latest values (not cursor-aware)
       local known_regs = {}
       for reg, usage in pairs(func.register_usage) do
-        local last_val = usage.values[#usage.values]
-        if last_val and last_val ~= "unknown" then
-          table.insert(known_regs, {reg = reg, value = last_val})
+        if usage.latest then
+          table.insert(known_regs, {reg = reg, info = usage.latest})
         end
       end
       
-      if #known_regs > 0 then
-        -- Sort registers for consistent display
-        table.sort(known_regs, function(a, b) return a.reg < b.reg end)
+      -- Filter: prefer full registers over sub-registers
+      -- If rax is present, don't show eax/ax/al
+      local filtered_regs = {}
+      local skip_subregs = {}
+      
+      -- First pass: identify full registers that are present
+      for _, item in ipairs(known_regs) do
+        local reg = item.reg
+        if reg == "rax" then
+          skip_subregs["eax"] = true
+          skip_subregs["ax"] = true
+          skip_subregs["al"] = true
+        elseif reg == "rbx" then
+          skip_subregs["ebx"] = true
+          skip_subregs["bx"] = true
+          skip_subregs["bl"] = true
+        elseif reg == "rcx" then
+          skip_subregs["ecx"] = true
+          skip_subregs["cx"] = true
+          skip_subregs["cl"] = true
+        elseif reg == "rdx" then
+          skip_subregs["edx"] = true
+          skip_subregs["dx"] = true
+          skip_subregs["dl"] = true
+        elseif reg == "rsi" then
+          skip_subregs["esi"] = true
+          skip_subregs["si"] = true
+          skip_subregs["sil"] = true
+        elseif reg == "rdi" then
+          skip_subregs["edi"] = true
+          skip_subregs["di"] = true
+          skip_subregs["dil"] = true
+        elseif reg == "rbp" then
+          skip_subregs["ebp"] = true
+          skip_subregs["bp"] = true
+          skip_subregs["bpl"] = true
+        elseif reg == "rsp" then
+          skip_subregs["esp"] = true
+          skip_subregs["sp"] = true
+          skip_subregs["spl"] = true
+        elseif reg:match("^r(%d+)$") then
+          local num = reg:match("^r(%d+)$")
+          skip_subregs["r" .. num .. "d"] = true
+          skip_subregs["r" .. num .. "w"] = true
+          skip_subregs["r" .. num .. "b"] = true
+        end
+      end
+      
+      -- Filter out skipped sub-registers
+      for _, item in ipairs(known_regs) do
+        if not skip_subregs[item.reg] then
+          table.insert(filtered_regs, item)
+        end
+      end
+      
+      if #filtered_regs > 0 then
+        -- Sort registers for consistent display (common registers first)
+        local reg_order = {rax=1, rbx=2, rcx=3, rdx=4, rsi=5, rdi=6, r8=7, r9=8, r10=9, r11=10, r12=11, r13=12, r14=13, r15=14}
+        table.sort(filtered_regs, function(a, b)
+          local order_a = reg_order[a.reg] or 99
+          local order_b = reg_order[b.reg] or 99
+          if order_a == order_b then
+            return a.reg < b.reg
+          end
+          return order_a < order_b
+        end)
         
-        for _, item in ipairs(known_regs) do
+        -- No section header, just separator
+        table.insert(lines, string.rep("─", w))
+        
+        for _, item in ipairs(filtered_regs) do
           local reg = item.reg
-          local last_val = item.value
+          local info = item.info
           
-          -- Format register line showing current value
+          -- Format register line based on operation type
           local reg_line
-          if last_val:match("^&%[rbp") then
-            -- Pointer to stack
-            reg_line = string.format(" %s = %s", reg, last_val)
-          elseif last_val:match("^stack%[rbp") then
+          if info.type == "call" then
+            -- Function call result
+            reg_line = string.format(" %s = %s", reg, info.display)
+          elseif info.type == "reg_move" then
+            -- Register-to-register move
+            reg_line = string.format(" %s = %s", reg, info.display)
+          elseif info.type == "stack_load" then
             -- Loaded from stack
-            reg_line = string.format(" %s = %s", reg, last_val:gsub("stack", ""))
+            reg_line = string.format(" %s = %s", reg, info.display)
+          elseif info.type == "lea" then
+            -- Address of stack location
+            reg_line = string.format(" %s = %s", reg, info.display)
+          elseif info.type == "immediate" then
+            -- Immediate value
+            reg_line = string.format(" %s = %s", reg, info.display)
+          elseif info.type == "add" or info.type == "sub" then
+            -- Arithmetic operation
+            reg_line = string.format(" %s %s", reg, info.display)
           else
-            -- Constant or other value
-            reg_line = string.format(" %s = %s", reg, last_val)
+            -- Generic
+            reg_line = string.format(" %s = %s", reg, info.display)
           end
           
           if #reg_line > w then reg_line = reg_line:sub(1, w - 3) .. "..." end
           table.insert(lines, reg_line)
-          table.insert(highlights, {line = #lines, col = 0, hl = "Special"})
+          table.insert(highlights, {line = #lines, col = 0, hl = "Number"})
+          
+          -- Map line to source for jump functionality
+          jump_map[#lines] = info.line
         end
       end
     end
@@ -663,7 +832,13 @@ function M.refresh()
     active_offsets = line_map[cursor_line]
   end
   
-  local viz_lines, highlights = generate_lines(functions, width, active_offsets)
+  local cursor_line = nil
+  if source_win ~= -1 then
+    local win_id = vim.fn.win_getid(source_win)
+    cursor_line = vim.api.nvim_win_get_cursor(win_id)[1]
+  end
+  
+  local viz_lines, highlights = generate_lines(functions, width, active_offsets, cursor_line)
   
   vim.api.nvim_buf_set_option(stack_buf, 'modifiable', true)
   vim.api.nvim_buf_set_lines(stack_buf, 0, -1, false, viz_lines)
