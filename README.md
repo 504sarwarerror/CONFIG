@@ -1,4 +1,4 @@
-A powerful Neovim plugin that provides real-time, dynamic visualization of assembly stack layouts with advanced error detection and analysis capabilities.
+Neovim plugin that provides real-time, dynamic visualization of assembly stack layouts with advanced error detection and analysis capabilities.
 ## Features
 
 ### Core Functionality
