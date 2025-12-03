@@ -1,17 +1,3 @@
--- ============================================================================
--- EXAMPLE NEOVIM CONFIGURATION
--- ============================================================================
--- This is a complete example Neovim configuration showing how to set up
--- a full assembly development environment with the Stack Visualization plugin.
---
--- To use this configuration:
--- 1. Copy this file to ~/.config/nvim/init.lua
--- 2. Install lazy.nvim (it will auto-install on first run)
--- 3. Open Neovim and run :Lazy sync
---
--- Or just use parts of this config that you need!
--- ============================================================================
-
 vim.g.python3_host_prog = '/usr/local/bin/python3'
 
 vim.g.polyglot_disabled = { 'asm' }
@@ -923,17 +909,6 @@ vim.keymap.set('i', '<C-z>', '<C-o>u', { noremap = true, silent = true, desc = "
 vim.keymap.set('n', '<C-S-z>', '<C-r>', { noremap = true, silent = true, desc = "Redo" })
 vim.keymap.set('i', '<C-S-z>', '<C-o><C-r>', { noremap = true, silent = true, desc = "Redo" })
 
-
--- ============================================================================
--- STACK VISUALIZATION PLUGIN SETUP
--- ============================================================================
--- This shows how to configure the Stack Visualization plugin in your config
--- If you installed via a plugin manager, this is all you need!
-
--- Option 1: Minimal setup (use defaults)
--- require('stack_visualization').setup()
-
--- Option 2: Custom setup with auto-start
 require('stack_visualization').setup({
   auto_start = true,  -- Auto-open for assembly files
   keybindings = {
@@ -942,5 +917,16 @@ require('stack_visualization').setup({
   filetypes = { 'asm', 'nasm' },
 })
 
--- Note: The :StackViz command is automatically available after plugin loads
--- ============================================================================
+-- ObjDump Mapping - Maps assembly instructions to object addresses
+require('objdump_mapping').setup({
+  auto_start = false,  -- Manual start with keybinding
+  keybindings = {
+    toggle = '<leader>om',      -- Toggle objdump mapping
+    refresh = '<leader>or',     -- Refresh mapping
+    select_exe = '<leader>oe',  -- Select executable
+  },
+  filetypes = { 'asm', 'nasm', 's' },
+  objdump_cmd = 'objdump',       -- Use 'llvm-objdump' on macOS if needed
+  objdump_flags = '-d -M intel', -- Disassemble with Intel syntax
+  address_format = 'short',      -- 'short' = last 7 chars, 'full' = complete
+})
