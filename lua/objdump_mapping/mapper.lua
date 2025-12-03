@@ -11,6 +11,7 @@ local state = {
   mappings = {},       -- instruction -> address mapping
   line_addresses = {}, -- line number -> address mapping
   buf_id = nil,
+  auto_refresh_timer = nil,  -- Timer for auto-refresh
 }
 
 -- Initialize highlight group
@@ -378,6 +379,13 @@ function M.enable()
   
   state.enabled = true
   
+  -- Start auto-refresh timer (1 minute = 60000ms)
+  local config = get_config()
+  local interval = config.auto_refresh_interval or 60000
+  if not state.auto_refresh_timer then
+    M.start_auto_refresh(interval)
+  end
+  
   local count = 0
   for _ in pairs(state.line_addresses) do count = count + 1 end
   vim.notify(string.format('ObjDump mapping enabled: %d lines mapped', count), vim.log.levels.INFO)
@@ -385,6 +393,9 @@ end
 
 -- Disable function
 function M.disable()
+  -- Stop auto-refresh timer
+  M.stop_auto_refresh()
+  
   if state.buf_id then
     clear_virtual_text(state.buf_id)
   end
@@ -445,6 +456,43 @@ end
 -- Get current state (for debugging)
 function M.get_state()
   return state
+end
+
+-- Start auto-refresh timer (default: 60 seconds = 1 minute)
+function M.start_auto_refresh(interval_ms)
+  interval_ms = interval_ms or 60000  -- Default 1 minute
+  
+  -- Stop existing timer if any
+  M.stop_auto_refresh()
+  
+  -- Create new timer
+  state.auto_refresh_timer = vim.loop.new_timer()
+  state.auto_refresh_timer:start(interval_ms, interval_ms, vim.schedule_wrap(function()
+    if state.enabled and state.current_exe then
+      -- Silently refresh without notification spam
+      local buf_id = state.buf_id
+      if buf_id and vim.api.nvim_buf_is_valid(buf_id) then
+        local output = run_objdump(state.current_exe)
+        if #output > 0 then
+          state.mappings = parse_objdump(output)
+          state.line_addresses = match_source_to_objdump(buf_id, state.mappings)
+          apply_virtual_text(buf_id, state.line_addresses)
+        end
+      end
+    end
+  end))
+  
+  vim.notify('ObjDump auto-refresh started (every ' .. (interval_ms / 1000) .. 's)', vim.log.levels.INFO)
+end
+
+-- Stop auto-refresh timer
+function M.stop_auto_refresh()
+  if state.auto_refresh_timer then
+    state.auto_refresh_timer:stop()
+    state.auto_refresh_timer:close()
+    state.auto_refresh_timer = nil
+    vim.notify('ObjDump auto-refresh stopped', vim.log.levels.INFO)
+  end
 end
 
 return M

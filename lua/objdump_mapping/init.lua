@@ -32,6 +32,9 @@ M.config = {
   
   -- Address format (short = last 7 chars, full = complete address)
   address_format = 'short',
+  
+  -- Auto-refresh interval in milliseconds (default: 60000 = 1 minute)
+  auto_refresh_interval = 60000,
 }
 
 -- Setup function for user configuration
@@ -101,6 +104,14 @@ end
 
 function M.select_executable()
   require('objdump_mapping.mapper').select_executable()
+end
+
+function M.start_auto_refresh(interval_ms)
+  require('objdump_mapping.mapper').start_auto_refresh(interval_ms)
+end
+
+function M.stop_auto_refresh()
+  require('objdump_mapping.mapper').stop_auto_refresh()
 end
 
 return M
