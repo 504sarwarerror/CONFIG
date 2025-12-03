@@ -4,7 +4,7 @@ A powerful Neovim plugin that provides real-time, dynamic visualization of assem
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
-## ✨ Features
+## Features
 
 ### Core Functionality
 - **Real-time Stack Visualization**: Automatically parses assembly code and displays stack layout
@@ -31,7 +31,7 @@ A powerful Neovim plugin that provides real-time, dynamic visualization of assem
 - **Random Access Patterns**: Warns about potential cache misses
 - **Large Stack Allocations**: Recommends heap allocation for large buffers
 
-## 📦 Installation
+## Installation
 
 ### Using [lazy.nvim](https://github.com/folke/lazy.nvim) (Recommended)
 
@@ -109,7 +109,7 @@ Then add to your config:
 require('stack_visualization').setup()
 ```
 
-## ⚙️ Configuration
+## Configuration
 
 ### Default Configuration
 
@@ -148,7 +148,7 @@ require('stack_visualization').setup({
 vim.keymap.set('n', '<F9>', ':StackViz<CR>', { desc = 'Show Stack Visualizer' })
 ```
 
-## 🚀 Usage
+## Usage
 
 ### Commands
 
@@ -180,7 +180,7 @@ vim.keymap.set('n', '<F9>', ':StackViz<CR>', { desc = 'Show Stack Visualizer' })
 ```
 ────────────────────────────────────────────
          main • 512B (75%)
- ⚠ 2 OOB @64,128 • 1 Uninit @32
+ 2 OOB @64,128 • 1 Uninit @32
 ────────────────────────────────────────────
  Return Address (8B)
 ────────────────────────────────────────────
@@ -216,7 +216,7 @@ qword
 - **Gray (Comment)**: Gaps and metadata
 - **Yellow (Search)**: Currently active variable
 
-## 📝 Examples
+## Examples
 
 ### Basic Stack Frame
 
@@ -250,7 +250,7 @@ main:
     ret
 ```
 
-## 🔧 Error Detection Details
+## Error Detection Details
 
 ### Out-of-Bounds Access
 Detects when code accesses stack memory beyond the allocated `sub rsp, N` size:
@@ -283,7 +283,7 @@ lea rcx, [rbp-32]
 call lstrcpy       ; WARNING: Unsafe function
 ```
 
-## 🎨 Full Neovim Configuration Example
+## Full Neovim Configuration Example
 
 See [`init.lua`](init.lua) for a complete example Neovim configuration that includes:
 - Complete plugin setup with lazy.nvim
@@ -295,7 +295,7 @@ See [`init.lua`](init.lua) for a complete example Neovim configuration that incl
 
 This serves as a reference for setting up a full assembly development environment.
 
-## 📚 API Reference
+## API Reference
 
 ### Lua API
 
@@ -319,7 +319,7 @@ require('stack_visualization').start_auto_reload()
 require('stack_visualization').stop_auto_reload()
 ```
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ### Visualizer Not Updating
 - Ensure you're in an assembly file (`.asm` or `.s`)
@@ -335,7 +335,7 @@ require('stack_visualization').stop_auto_reload()
 - Increase refresh rate in the stack_visualizer module for large files
 - Disable auto-reload: `:StackVizAutoReloadStop`
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Feel free to:
 - Report bugs
@@ -343,11 +343,11 @@ Contributions are welcome! Feel free to:
 - Submit pull requests
 - Improve documentation
 
-## 📄 License
+## License
 
 MIT License - see [LICENSE](LICENSE) file for details.
 
-## 🙏 Credits
+## Credits
 
 Developed for advanced assembly development workflows in Neovim.
 
