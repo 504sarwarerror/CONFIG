@@ -1,5 +1,10 @@
-Neovim plugin that provides real-time, dynamic visualization of assembly stack layouts with advanced error detection and analysis capabilities.
-## Features
+# DOTNVIM - Assembly Stack Visualizer for Neovim
+
+A powerful Neovim plugin that provides real-time, dynamic visualization of assembly stack layouts with advanced error detection and analysis capabilities.
+
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+
+## ✨ Features
 
 ### Core Functionality
 - **Real-time Stack Visualization**: Automatically parses assembly code and displays stack layout
@@ -26,63 +31,141 @@ Neovim plugin that provides real-time, dynamic visualization of assembly stack l
 - **Random Access Patterns**: Warns about potential cache misses
 - **Large Stack Allocations**: Recommends heap allocation for large buffers
 
-## Installation
+## 📦 Installation
 
-### Prerequisites
-- Neovim 0.7+ (for Lua API support)
-- Assembly files with `.asm` or `.s` extension
-
-### Step 1: Copy the Module
-
-```bash
-# Create the lua directory if it doesn't exist
-mkdir -p ~/.config/nvim/lua
-
-# Copy the stack visualizer module
-cp stack_visualizer.lua ~/.config/nvim/lua/
-```
-
-### Step 2: Configure Neovim
-
-Add the following to your `~/.config/nvim/init.lua`:
+### Using [lazy.nvim](https://github.com/folke/lazy.nvim) (Recommended)
 
 ```lua
--- Stack Visualizer for Assembly Development
-vim.api.nvim_create_user_command('StackViz', function()
-  require('stack_visualizer').show()
-end, {})
-
--- Optional: Add keybindings
-vim.keymap.set('n', '<leader>sv', ':StackViz<CR>', { 
-  noremap = true, 
-  silent = true, 
-  desc = 'Show Stack Visualization' 
-})
-
--- Optional: Auto-start for assembly files
-vim.api.nvim_create_autocmd('FileType', {
-  pattern = {'asm', 'nasm'},
-  callback = function()
-    require('stack_visualizer').show()
+{
+  '504sarwarerror/DOTNVIM',
+  config = function()
+    require('dotnvim').setup({
+      -- Auto-start visualizer for assembly files
+      auto_start = true,
+      
+      -- Keybindings
+      keybindings = {
+        toggle = '<leader>sv',
+      },
+      
+      -- File types to activate on
+      filetypes = { 'asm', 'nasm' },
+    })
   end,
-})
+  -- Only load for assembly files
+  ft = { 'asm', 'nasm' },
+}
 ```
 
-### Step 3: Reload Configuration
+### Using [packer.nvim](https://github.com/wbthomason/packer.nvim)
+
+```lua
+use {
+  '504sarwarerror/DOTNVIM',
+  config = function()
+    require('dotnvim').setup({
+      auto_start = true,
+      keybindings = {
+        toggle = '<leader>sv',
+      },
+    })
+  end,
+  ft = { 'asm', 'nasm' },
+}
+```
+
+### Using [vim-plug](https://github.com/junegunn/vim-plug)
 
 ```vim
-:source ~/.config/nvim/init.lua
+Plug '504sarwarerror/DOTNVIM'
 ```
 
-Or restart Neovim.
+Then in your `init.lua` or `init.vim`:
 
-## Usage
+```lua
+lua << EOF
+require('dotnvim').setup({
+  auto_start = true,
+  keybindings = {
+    toggle = '<leader>sv',
+  },
+})
+EOF
+```
+
+### Manual Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/504sarwarerror/DOTNVIM.git ~/.local/share/nvim/site/pack/plugins/start/DOTNVIM
+
+# Or for lazy loading
+git clone https://github.com/504sarwarerror/DOTNVIM.git ~/.local/share/nvim/site/pack/plugins/opt/DOTNVIM
+```
+
+Then add to your config:
+
+```lua
+require('dotnvim').setup()
+```
+
+## ⚙️ Configuration
+
+### Default Configuration
+
+```lua
+require('dotnvim').setup({
+  -- Auto-start visualizer for assembly files
+  auto_start = false,
+  
+  -- Default keybindings
+  keybindings = {
+    toggle = '<leader>sv',
+  },
+  
+  -- File types to activate on
+  filetypes = { 'asm', 'nasm' },
+})
+```
+
+### Minimal Configuration
+
+```lua
+-- Just use defaults
+require('dotnvim').setup()
+```
+
+### Custom Keybindings
+
+```lua
+require('dotnvim').setup({
+  keybindings = {
+    toggle = '<leader>as',  -- Custom toggle key
+  },
+})
+
+-- Or set up your own keybindings
+vim.keymap.set('n', '<F9>', ':StackViz<CR>', { desc = 'Show Stack Visualizer' })
+```
+
+## 🚀 Usage
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `:StackViz` | Show/toggle the stack visualizer |
+| `:StackVizRefresh` | Manually refresh the display |
+| `:StackVizJump` | Jump to variable definition in source |
+| `:StackVizTooltip` | Show detailed error tooltip |
+| `:StackVizAutoReloadStart` | Start auto-reload timer |
+| `:StackVizAutoReloadStop` | Stop auto-reload timer |
 
 ### Opening the Visualizer
 
 1. **Command**: `:StackViz`
-2. **Keybinding**: `<leader>sv` (if configured)
-3. **Auto-open**: Opens automatically for `.asm`/`.s` files (if configured)
+2. **Keybinding**: `<leader>sv` (default, if configured)
+3. **Auto-open**: Opens automatically for `.asm`/`.s` files (if `auto_start = true`)
 
 ### Navigation
 
@@ -133,119 +216,7 @@ qword
 - **Gray (Comment)**: Gaps and metadata
 - **Yellow (Search)**: Currently active variable
 
-## Configuration
-
-### Adjusting Refresh Rate
-
-```lua
--- In stack_visualizer.lua, modify the config table:
-local config = {
-  refresh_rate = 5000, -- milliseconds (default: 5000)
-  unsafe_funcs = {
-    -- Add or remove unsafe functions
-    "strcpy", "gets", "scanf", -- etc.
-  }
-}
-```
-
-### Customizing Window Size
-
-The visualizer window opens at 50 columns wide by default. Resize it manually or modify:
-
-```lua
--- In stack_visualizer.lua, line ~780:
-vim.api.nvim_win_set_width(stack_win, 50) -- Change to desired width
-```
-
-### Adding Custom Unsafe Functions
-
-Edit the `unsafe_funcs` table in `stack_visualizer.lua`:
-
-```lua
-unsafe_funcs = {
-  "strcpy", "lstrcpy", "lstrcpyA", "lstrcpyW",
-  "strcat", "lstrcat", "lstrcatA", "lstrcatW",
-  "gets", "scanf", "wscanf", "sscanf", "swscanf",
-  "sprintf", "wsprintf", "swprintf", "vsprintf", "vswprintf",
-  "strncpy", "wcsncpy", "strncat", "wcsncat",
-  -- Add your custom functions here
-  "my_unsafe_function",
-}
-```
-
-## Error Detection Details
-
-### Out-of-Bounds Access
-Detects when code accesses stack memory beyond the allocated `sub rsp, N` size:
-
-```asm
-sub rsp, 32        ; Allocate 32 bytes
-mov rax, [rbp-64]  ; ERROR: Access beyond 32 bytes
-```
-
-### Uninitialized Variables
-Warns when reading from stack locations before writing:
-
-```asm
-mov rax, [rbp-8]   ; ERROR: Read before write
-mov [rbp-8], 100   ; Should write first
-```
-
-### Return Address Tampering
-Detects dangerous accesses above RBP:
-
-```asm
-mov rax, [rbp+8]   ; WARNING: Accessing return address area
-```
-
-### Unsafe Functions
-Identifies buffer overflow-prone functions:
-
-```asm
-lea rcx, [rbp-32]
-call lstrcpy       ; WARNING: Unsafe function
-```
-
-## Advanced Features
-
-### Register Tracking
-
-The visualizer tracks all register operations and displays:
-- Current register values
-- Stack pointers (registers pointing to stack locations)
-- Loaded values from stack
-
-### Optimization Hints
-
-Automatically suggests optimizations:
-- **Single-use variables**: Use registers instead
-- **Random access patterns**: Reorganize for cache efficiency
-- **Large allocations**: Consider heap instead of stack
-
-### Interactive Tooltips
-
-Hover over any stack variable and press `K` to see:
-- Detailed error messages
-- Line numbers of problematic code
-- Suggested fixes
-
-## Troubleshooting
-
-### Visualizer Not Updating
-- Ensure you're in an assembly file (`.asm` or `.s`)
-- Check that the file contains valid function labels (e.g., `main:`)
-- Verify stack allocation with `sub rsp, N`
-
-### No Errors Detected
-- The visualizer only detects errors it can statically analyze
-- Some runtime errors may not be visible
-- Ensure your assembly follows standard conventions (RBP-based addressing)
-
-### Performance Issues
-- Increase `refresh_rate` in config for large files
-- Disable auto-reload: `require('stack_visualizer').stop_auto_reload()`
-
-## Examples
+## 📝 Examples
 
 ### Basic Stack Frame
 
@@ -279,42 +250,107 @@ main:
     ret
 ```
 
-## API Reference
+## 🔧 Error Detection Details
 
-### Functions
+### Out-of-Bounds Access
+Detects when code accesses stack memory beyond the allocated `sub rsp, N` size:
+
+```asm
+sub rsp, 32        ; Allocate 32 bytes
+mov rax, [rbp-64]  ; ERROR: Access beyond 32 bytes
+```
+
+### Uninitialized Variables
+Warns when reading from stack locations before writing:
+
+```asm
+mov rax, [rbp-8]   ; ERROR: Read before write
+mov [rbp-8], 100   ; Should write first
+```
+
+### Return Address Tampering
+Detects dangerous accesses above RBP:
+
+```asm
+mov rax, [rbp+8]   ; WARNING: Accessing return address area
+```
+
+### Unsafe Functions
+Identifies buffer overflow-prone functions:
+
+```asm
+lea rcx, [rbp-32]
+call lstrcpy       ; WARNING: Unsafe function
+```
+
+## 🎨 Full Neovim Configuration Example
+
+See [`init.lua`](init.lua) for a complete example Neovim configuration that includes:
+- Complete plugin setup with lazy.nvim
+- Catppuccin theme with transparency
+- Assembly development tools
+- Git integration
+- File navigation
+- And much more!
+
+This serves as a reference for setting up a full assembly development environment.
+
+## 📚 API Reference
+
+### Lua API
 
 ```lua
 -- Show/open the visualizer
-require('stack_visualizer').show()
+require('dotnvim').show()
 
 -- Manually refresh the display
-require('stack_visualizer').refresh()
+require('dotnvim').refresh()
 
 -- Jump to source definition
-require('stack_visualizer').jump()
+require('dotnvim').jump()
 
 -- Show error tooltip
-require('stack_visualizer').show_tooltip()
+require('dotnvim').show_tooltip()
 
 -- Start auto-reload timer
-require('stack_visualizer').start_auto_reload()
+require('dotnvim').start_auto_reload()
 
 -- Stop auto-reload timer
-require('stack_visualizer').stop_auto_reload()
+require('dotnvim').stop_auto_reload()
 ```
 
-## Contributing
+## 🐛 Troubleshooting
 
-Feel free to extend the visualizer with:
-- Additional error detection patterns
-- Support for other assembly syntaxes (AT&T, ARM, etc.)
-- Custom visualization themes
-- Integration with debuggers
+### Visualizer Not Updating
+- Ensure you're in an assembly file (`.asm` or `.s`)
+- Check that the file contains valid function labels (e.g., `main:`)
+- Verify stack allocation with `sub rsp, N`
 
-## License
+### No Errors Detected
+- The visualizer only detects errors it can statically analyze
+- Some runtime errors may not be visible
+- Ensure your assembly follows standard conventions (RBP-based addressing)
 
-This plugin is provided as-is for educational and development purposes.
+### Performance Issues
+- Increase refresh rate in the stack_visualizer module for large files
+- Disable auto-reload: `:StackVizAutoReloadStop`
 
-## Credits
+## 🤝 Contributing
+
+Contributions are welcome! Feel free to:
+- Report bugs
+- Suggest new features
+- Submit pull requests
+- Improve documentation
+
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) file for details.
+
+## 🙏 Credits
 
 Developed for advanced assembly development workflows in Neovim.
+
+---
+
+**Note**: This plugin is designed for x86-64 assembly with standard calling conventions. Support for other architectures and syntaxes (AT&T, ARM, etc.) may be added in the future.

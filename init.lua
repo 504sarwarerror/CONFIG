@@ -1,3 +1,16 @@
+-- ============================================================================
+-- EXAMPLE NEOVIM CONFIGURATION
+-- ============================================================================
+-- This is a complete example Neovim configuration showing how to set up
+-- a full assembly development environment with the DOTNVIM plugin.
+--
+-- To use this configuration:
+-- 1. Copy this file to ~/.config/nvim/init.lua
+-- 2. Install lazy.nvim (it will auto-install on first run)
+-- 3. Open Neovim and run :Lazy sync
+--
+-- Or just use parts of this config that you need!
+-- ============================================================================
 
 vim.g.python3_host_prog = '/usr/local/bin/python3'
 
@@ -911,23 +924,20 @@ vim.keymap.set('n', '<C-S-z>', '<C-r>', { noremap = true, silent = true, desc = 
 vim.keymap.set('i', '<C-S-z>', '<C-o><C-r>', { noremap = true, silent = true, desc = "Redo" })
 
 
-vim.api.nvim_create_user_command('StackViz', function()
-  require('stack_visualizer').show()
-end, {})
+-- ============================================================================
+-- DOTNVIM PLUGIN SETUP (Stack Visualizer)
+-- ============================================================================
+-- This shows how to configure the DOTNVIM plugin in your config
+-- If you installed via a plugin manager, this is all you need!
 
-vim.keymap.set('n', '<leader>sv', ':StackViz<CR>', { noremap = true, silent = true, desc = 'Show Stack Visualization' })
+-- Option 1: Minimal setup (use defaults)
+-- require('dotnvim').setup()
 
-
--- Auto-start Stack Visualizer for assembly files
-vim.api.nvim_create_autocmd({"BufEnter", "BufWinEnter"}, {
-  pattern = { "*.asm", "*.s" },
-  callback = function()
-    vim.defer_fn(function()
-      local ok, sv = pcall(require, 'stack_visualizer')
-      if ok then
-        sv.show()
-        sv.start_auto_reload()
-      end
-    end, 200)
-  end,
+-- Option 2: Custom setup with auto-start
+require('dotnvim').setup({
+  auto_start = true,  -- Auto-open for assembly files
+  keybindings = {
+    toggle = '<leader>sv',
+  },
+  filetypes = { 'asm', 'nasm' },
 })
