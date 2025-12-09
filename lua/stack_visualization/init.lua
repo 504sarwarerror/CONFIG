@@ -1,11 +1,11 @@
--- Stack Visualization - Assembly Stack Visualizer Plugin
+-- Stack Visualization - Assembly and C/C++ Stack Visualizer Plugin
 -- Main plugin module
 
 local M = {}
 
 -- Default configuration
 M.config = {
-  -- Auto-start visualizer for assembly files
+  -- Auto-start visualizer for supported files
   auto_start = false,
   
   -- Default keybindings
@@ -14,7 +14,7 @@ M.config = {
   },
   
   -- File types to activate on
-  filetypes = { 'asm', 'nasm' },
+  filetypes = { 'asm', 'nasm', 'c', 'cpp', 'h', 'hpp' },
 }
 
 -- Setup function for user configuration

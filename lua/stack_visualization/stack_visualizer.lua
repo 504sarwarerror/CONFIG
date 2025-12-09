@@ -1,4 +1,4 @@
--- Stack Visualizer for Assembly Code
+-- Stack Visualizer for Assembly and C/C++ Code
 -- Advanced dynamic stack visualization with Runtime Error Detection
 
 local M = {}
@@ -6,6 +6,7 @@ local timer = nil
 local source_buf = nil
 local stack_buf = nil
 local stack_win = nil
+local source_filetype = nil  -- Track the filetype of the source
 
 -- Module-level map for interactive jump: stack_line -> source_line
 local jump_map = {}
@@ -36,14 +37,45 @@ local function is_unsafe(usage_list)
   return false
 end
 
--- Helper: Get size from type
+-- Helper: Get size from type (supports both assembly and C/C++ types)
 local function get_type_size(vtype)
+  -- Assembly types
   if vtype == "byte" then return 1
   elseif vtype == "word" then return 2
   elseif vtype == "dword" then return 4
   elseif vtype == "qword" then return 8
   elseif vtype == "string" then return 32 -- Heuristic for strings
-  else return 8 end -- Default to qword/pointer size
+  -- C/C++ types
+  elseif vtype == "char" then return 1
+  elseif vtype == "unsigned char" then return 1
+  elseif vtype == "short" then return 2
+  elseif vtype == "unsigned short" then return 2
+  elseif vtype == "int" then return 4
+  elseif vtype == "unsigned int" then return 4
+  elseif vtype == "unsigned" then return 4
+  elseif vtype == "long" then return 8
+  elseif vtype == "unsigned long" then return 8
+  elseif vtype == "long long" then return 8
+  elseif vtype == "unsigned long long" then return 8
+  elseif vtype == "float" then return 4
+  elseif vtype == "double" then return 8
+  elseif vtype == "long double" then return 16
+  elseif vtype == "bool" then return 1
+  elseif vtype == "size_t" then return 8
+  elseif vtype == "ptrdiff_t" then return 8
+  elseif vtype == "intptr_t" then return 8
+  elseif vtype == "uintptr_t" then return 8
+  elseif vtype == "int8_t" then return 1
+  elseif vtype == "uint8_t" then return 1
+  elseif vtype == "int16_t" then return 2
+  elseif vtype == "uint16_t" then return 2
+  elseif vtype == "int32_t" then return 4
+  elseif vtype == "uint32_t" then return 4
+  elseif vtype == "int64_t" then return 8
+  elseif vtype == "uint64_t" then return 8
+  elseif vtype == "void*" or vtype:match("%*$") then return 8 -- Pointers
+  elseif vtype == "buffer" then return 32 -- Heuristic for buffers
+  else return 8 end -- Default to 64-bit size
 end
 
 -- Format bytes
@@ -151,9 +183,14 @@ local function parse_assembly(lines)
       -- Case-insensitive match for 'call'
       local call_target = trimmed:match("^[Cc][Aa][Ll][Ll]%s+(.+)")
       if call_target then
-        -- Extract just the function name
-        -- Handle various formats: func, func(args), [func], etc.
-        local func_name = call_target:match("^([%w_@?]+)") -- Basic name
+        -- Extract function name and arguments
+        -- Handle formats: func, func(args), [func], etc.
+        local func_name, func_args = call_target:match("^([%w_@?]+)%((.*)%)%s*$")
+        
+        if not func_name then
+          -- No parentheses, just a function name
+          func_name = call_target:match("^([%w_@?]+)")
+        end
         
         if not func_name then
            -- Try to handle *[name] or similar
@@ -161,6 +198,70 @@ local function parse_assembly(lines)
         end
         
         func_name = func_name or call_target
+        
+        -- Parse arguments for stack variable references: *[rbp - N] or [rbp - N]
+        if func_args then
+          -- Split arguments by comma (handling nested brackets)
+          local arg_index = 0
+          for arg in func_args:gmatch("[^,]+") do
+            arg_index = arg_index + 1
+            local trimmed_arg = arg:match("^%s*(.-)%s*$")
+            
+            -- Match patterns like *[rbp - 16], *[rbp-8], [rbp - 32], [rbp-24]
+            local stack_offset = trimmed_arg:match("%*?%[rbp%s*%-%s*(%d+)%]")
+            if stack_offset then
+              local off_num = tonumber(stack_offset)
+              
+              -- Add to line_map for cursor tracking
+              if not line_map[i] then line_map[i] = {} end
+              table.insert(line_map[i], off_num)
+              table.insert(current_func.access_order, off_num)
+              
+              -- Check for out-of-bounds access
+              if current_func.stack_size > 0 and off_num > current_func.stack_size then
+                table.insert(current_func.errors, {
+                  type = "out_of_bounds",
+                  line = i,
+                  offset = off_num,
+                  message = string.format("Arg %d: Access [rbp-%d] exceeds stack size %d", arg_index, off_num, current_func.stack_size)
+                })
+              end
+              
+              -- Create or update variable entry
+              if not current_func.variables[off_num] then
+                current_func.variables[off_num] = {
+                  offset = off_num,
+                  type = "unknown",
+                  usage = {},
+                  def_line = i,
+                  reads = {},
+                  writes = {},
+                  access_count = 0,
+                }
+              end
+              
+              local var = current_func.variables[off_num]
+              var.access_count = var.access_count + 1
+              
+              -- Detect if it's a pointer arg (starts with *) - likely a write target
+              if trimmed_arg:match("^%*") then
+                table.insert(var.writes, i)
+                table.insert(var.usage, func_name .. " (out param " .. arg_index .. ")")
+              else
+                table.insert(var.reads, i)
+                table.insert(var.usage, func_name .. " (arg " .. arg_index .. ")")
+              end
+              
+              -- Try to infer type from function and argument position
+              local func_lower = func_name:lower()
+              if func_lower:match("read") and trimmed_arg:match("^%*") then
+                var.type = "buffer"
+              elseif func_lower:match("write") and not trimmed_arg:match("^%*") then
+                var.type = "buffer"
+              end
+            end
+          end
+        end
         
         -- Function calls typically return in rax (only track the full register)
         update_reg("rax", {
@@ -184,9 +285,9 @@ local function parse_assembly(lines)
         local display_value = mov_src
         local value_type = "mov"
 
-        -- Detect stack memory accesses (rbp-relative), allow + or - offsets
-        local stack_src = mov_src:match("%[rbp%-(%d+)%]") or mov_src:match("%[rbp%+%s*(%d+)%]")
-        local stack_dest = mov_dest:match("%[rbp%-(%d+)%]") or mov_dest:match("%[rbp%+%s*(%d+)%]")
+        -- Detect stack memory accesses (rbp-relative), allow + or - offsets with optional spaces
+        local stack_src = mov_src:match("%[rbp%s*%-%s*(%d+)%]") or mov_src:match("%[rbp%s*%+%s*(%d+)%]")
+        local stack_dest = mov_dest:match("%[rbp%s*%-%s*(%d+)%]") or mov_dest:match("%[rbp%s*%+%s*(%d+)%]")
 
         -- Extract pure register names if the operand is a simple register (e.g., 'rax', 'eax', 'r10d')
         local src_reg = mov_src:match("^(%w+)$")
@@ -257,7 +358,7 @@ local function parse_assembly(lines)
       end
       
       -- LEA operations (register pointing to stack) - case insensitive
-      local lea_reg, lea_offset = trimmed:lower():match("lea%s+(%w+),%s*%[rbp%-(%d+)%]")
+      local lea_reg, lea_offset = trimmed:lower():match("lea%s+(%w+),%s*%[rbp%s*%-%s*(%d+)%]")
       if lea_reg and lea_offset then
         current_func.register_map[lea_reg] = tonumber(lea_offset)
         update_reg(lea_reg, {
@@ -396,8 +497,8 @@ local function parse_assembly(lines)
         })
       end
       
-      -- Find ALL rbp-relative accesses in the line
-      for offset in trimmed:gmatch("%[rbp%-(%d+)%]") do
+      -- Find ALL rbp-relative accesses in the line (support optional spaces)
+      for offset in trimmed:gmatch("%[rbp%s*%-%s*(%d+)%]") do
         local off_num = tonumber(offset)
         
         if not line_map[i] then line_map[i] = {} end
@@ -438,12 +539,14 @@ local function parse_assembly(lines)
         local var = current_func.variables[off_num]
         var.access_count = var.access_count + 1
         
-        -- Track reads vs writes
-        if trimmed:match("mov%s+[^,]+,%s*%[rbp%-" .. off_num .. "%]") or
-           trimmed:match("lea%s+[^,]+,%s*%[rbp%-" .. off_num .. "%]") then
+        -- Track reads vs writes (support optional spaces around minus)
+        local read_pattern1 = "mov%s+[^,]+,%s*%[rbp%s*%-%s*" .. off_num .. "%]"
+        local read_pattern2 = "lea%s+[^,]+,%s*%[rbp%s*%-%s*" .. off_num .. "%]"
+        if trimmed:match(read_pattern1) or trimmed:match(read_pattern2) then
           table.insert(var.reads, i)
         end
-        if trimmed:match("mov%s+%[rbp%-" .. off_num .. "%]") then
+        local write_pattern = "mov%s+%[rbp%s*%-%s*" .. off_num .. "%]"
+        if trimmed:match(write_pattern) then
           table.insert(var.writes, i)
         end
         
@@ -520,6 +623,281 @@ local function parse_assembly(lines)
   return functions, line_map
 end
 
+-- Parse C/C++ file for stack information
+local function parse_c_cpp(lines)
+  local functions = {}
+  local current_func = nil
+  local line_map = {} -- Map line numbers to LIST of variables accessed
+  local brace_depth = 0
+  local current_stack_offset = 0
+  local var_offsets = {} -- Map variable names to their assigned offsets
+  
+  for i, line in ipairs(lines) do
+    local trimmed = line:match("^%s*(.-)%s*$")
+    
+    -- Skip comments and preprocessor directives
+    if trimmed:match("^//") or trimmed:match("^#") or trimmed:match("^/%*") then
+      goto continue
+    end
+    
+    -- Detect function definitions (simplified pattern)
+    -- Matches: type name(...) { or type name(...)\n{
+    local func_match = trimmed:match("^[%w_:%*%s]+%s+([%w_]+)%s*%(")
+    if func_match and not trimmed:match(";%s*$") and not trimmed:match("^if%s*%(") 
+       and not trimmed:match("^while%s*%(") and not trimmed:match("^for%s*%(")
+       and not trimmed:match("^switch%s*%(") then
+      -- Check if this line or next has opening brace
+      if trimmed:match("{") or (lines[i+1] and lines[i+1]:match("^%s*{")) then
+        current_func = {
+          name = func_match,
+          stack_size = 0,
+          variables = {},
+          saved_regs = {},
+          start_line = i,
+          has_calls = false,
+          errors = {},
+          register_map = {},
+          register_usage = {},
+          access_order = {},
+          hints = {},
+        }
+        functions[func_match] = current_func
+        brace_depth = 0
+        current_stack_offset = 0
+        var_offsets = {}
+      end
+    end
+    
+    -- Track brace depth
+    for _ in trimmed:gmatch("{") do
+      brace_depth = brace_depth + 1
+    end
+    for _ in trimmed:gmatch("}") do
+      brace_depth = brace_depth - 1
+      if brace_depth == 0 and current_func then
+        current_func.end_line = i
+        current_func.stack_size = current_stack_offset
+        current_func = nil
+      end
+    end
+    
+    if current_func then
+      current_func.end_line = i
+      
+      -- Detect local variable declarations
+      -- Pattern: type varname; or type varname = value; or type varname[size];
+      local patterns = {
+        -- Basic types with optional unsigned/signed
+        "^%s*(unsigned%s+long%s+long)%s+([%w_]+)",
+        "^%s*(signed%s+long%s+long)%s+([%w_]+)",
+        "^%s*(unsigned%s+long)%s+([%w_]+)",
+        "^%s*(signed%s+long)%s+([%w_]+)",
+        "^%s*(unsigned%s+short)%s+([%w_]+)",
+        "^%s*(signed%s+short)%s+([%w_]+)",
+        "^%s*(unsigned%s+int)%s+([%w_]+)",
+        "^%s*(signed%s+int)%s+([%w_]+)",
+        "^%s*(unsigned%s+char)%s+([%w_]+)",
+        "^%s*(signed%s+char)%s+([%w_]+)",
+        "^%s*(long%s+long)%s+([%w_]+)",
+        "^%s*(long%s+double)%s+([%w_]+)",
+        "^%s*(unsigned)%s+([%w_]+)",
+        "^%s*(size_t)%s+([%w_]+)",
+        "^%s*(ptrdiff_t)%s+([%w_]+)",
+        "^%s*(intptr_t)%s+([%w_]+)",
+        "^%s*(uintptr_t)%s+([%w_]+)",
+        "^%s*(int8_t)%s+([%w_]+)",
+        "^%s*(uint8_t)%s+([%w_]+)",
+        "^%s*(int16_t)%s+([%w_]+)",
+        "^%s*(uint16_t)%s+([%w_]+)",
+        "^%s*(int32_t)%s+([%w_]+)",
+        "^%s*(uint32_t)%s+([%w_]+)",
+        "^%s*(int64_t)%s+([%w_]+)",
+        "^%s*(uint64_t)%s+([%w_]+)",
+        "^%s*(double)%s+([%w_]+)",
+        "^%s*(float)%s+([%w_]+)",
+        "^%s*(long)%s+([%w_]+)",
+        "^%s*(short)%s+([%w_]+)",
+        "^%s*(char)%s+([%w_]+)",
+        "^%s*(int)%s+([%w_]+)",
+        "^%s*(bool)%s+([%w_]+)",
+        "^%s*(void%s*%*)%s*([%w_]+)",
+        "^%s*([%w_]+%s*%*)%s*([%w_]+)",  -- Pointer types like int*, char*
+        "^%s*([%w_:]+)%s+([%w_]+)",  -- Custom types / structs / classes
+      }
+      
+      local var_type, var_name
+      for _, pattern in ipairs(patterns) do
+        var_type, var_name = trimmed:match(pattern)
+        if var_type and var_name then
+          -- Make sure it's not a function call or control statement
+          if not var_name:match("^if$") and not var_name:match("^for$") 
+             and not var_name:match("^while$") and not var_name:match("^switch$")
+             and not var_name:match("^return$") and not trimmed:match("%(.*%)%s*{") then
+            break
+          else
+            var_type, var_name = nil, nil
+          end
+        end
+      end
+      
+      if var_type and var_name then
+        -- Clean up type
+        var_type = var_type:match("^%s*(.-)%s*$")
+        var_name = var_name:match("^%s*(.-)%s*$")
+        
+        -- Check for array declaration
+        local array_size = trimmed:match("%[(%d+)%]")
+        local type_size = get_type_size(var_type)
+        
+        if array_size then
+          type_size = type_size * tonumber(array_size)
+          var_type = var_type .. "[" .. array_size .. "]"
+        end
+        
+        -- Assign stack offset (simulating stack growth)
+        current_stack_offset = current_stack_offset + type_size
+        local offset = current_stack_offset
+        var_offsets[var_name] = offset
+        
+        current_func.variables[offset] = {
+          offset = offset,
+          type = var_type,
+          name = var_name,
+          size = type_size,
+          usage = {},
+          def_line = i,
+          reads = {},
+          writes = {i}, -- Declaration counts as write
+          access_count = 1,
+        }
+        
+        if not line_map[i] then line_map[i] = {} end
+        table.insert(line_map[i], offset)
+        table.insert(current_func.access_order, offset)
+      end
+      
+      -- Track variable usage (reads and writes)
+      for var_name, offset in pairs(var_offsets) do
+        -- Check if variable is used in this line (but not declared)
+        local var = current_func.variables[offset]
+        if var and i ~= var.def_line then
+          -- Pattern to find variable usage
+          local usage_pattern = "[^%w_]" .. var_name .. "[^%w_]"
+          local start_pattern = "^" .. var_name .. "[^%w_]"
+          local end_pattern = "[^%w_]" .. var_name .. "$"
+          local exact_pattern = "^" .. var_name .. "$"
+          
+          if trimmed:match(usage_pattern) or trimmed:match(start_pattern) 
+             or trimmed:match(end_pattern) or trimmed:match(exact_pattern) then
+            var.access_count = var.access_count + 1
+            
+            if not line_map[i] then line_map[i] = {} end
+            if not vim.tbl_contains(line_map[i], offset) then
+              table.insert(line_map[i], offset)
+            end
+            table.insert(current_func.access_order, offset)
+            
+            -- Determine if read or write
+            -- Write patterns: var = ..., var += ..., var++, ++var, etc.
+            local write_patterns = {
+              "^%s*" .. var_name .. "%s*[%+%-]?=",
+              "^%s*" .. var_name .. "%s*%+%+",
+              "^%s*" .. var_name .. "%s*%-%-",
+              "%+%+" .. var_name,
+              "%-%-" .. var_name,
+              "&%s*" .. var_name,  -- Taking address often means write
+            }
+            
+            local is_write = false
+            for _, wp in ipairs(write_patterns) do
+              if trimmed:match(wp) then
+                is_write = true
+                break
+              end
+            end
+            
+            if is_write then
+              table.insert(var.writes, i)
+            else
+              table.insert(var.reads, i)
+            end
+          end
+        end
+      end
+      
+      -- Track function calls
+      local func_call = trimmed:match("([%w_]+)%s*%(")
+      if func_call and not func_call:match("^if$") and not func_call:match("^for$")
+         and not func_call:match("^while$") and not func_call:match("^switch$") then
+        current_func.has_calls = true
+        
+        -- Check for unsafe function usage
+        for var_name, offset in pairs(var_offsets) do
+          if trimmed:match(func_call .. "%s*%([^%)]*" .. var_name) then
+            local var = current_func.variables[offset]
+            if var and not vim.tbl_contains(var.usage, func_call) then
+              table.insert(var.usage, func_call)
+            end
+          end
+        end
+      end
+    end
+    
+    ::continue::
+  end
+  
+  -- Post-process: generate errors and hints
+  for fname, func in pairs(functions) do
+    -- Check for uninitialized reads
+    for offset, var in pairs(func.variables) do
+      if #var.reads > 0 and #var.writes > 0 then
+        local first_read = var.reads[1]
+        local first_write = var.writes[1]
+        if first_read < first_write then
+          table.insert(func.errors, {
+            type = "uninit_read",
+            line = first_read,
+            offset = offset,
+            message = string.format("'%s' may be used uninitialized", var.name or "var")
+          })
+        end
+      end
+    end
+    
+    -- Check for unsafe function usage
+    for offset, var in pairs(func.variables) do
+      if is_unsafe(var.usage) then
+        table.insert(func.errors, {
+          type = "unsafe_usage",
+          line = var.def_line,
+          offset = offset,
+          message = string.format("'%s' used with unsafe function", var.name or "var")
+        })
+      end
+    end
+    
+    -- Hints
+    for offset, var in pairs(func.variables) do
+      if var.access_count == 1 then
+        table.insert(func.hints, {
+          type = "single_use",
+          offset = offset,
+          message = string.format("'%s' used only once", var.name or "var")
+        })
+      end
+    end
+    
+    if func.stack_size > 4096 then
+      table.insert(func.hints, {
+        type = "large_stack",
+        message = string.format("Large stack (%s) - consider heap allocation", format_bytes(func.stack_size))
+      })
+    end
+  end
+  
+  return functions, line_map
+end
+
 -- Calculate variable ranges with Gaps
 local function calculate_ranges(variables, total_stack, errors)
   local sorted = {}
@@ -559,8 +937,9 @@ local function calculate_ranges(variables, total_stack, errors)
     table.insert(ranges, {
       kind = "var",
       offset = var.offset,
-      size = type_size,
+      size = var.size or type_size,  -- Use explicit size if available (from C/C++ parser)
       vtype = var.type,
+      name = var.name,  -- Variable name for C/C++
       usage = var.usage,
       def_line = var.def_line,
       unsafe = is_unsafe(var.usage),
@@ -843,11 +1222,18 @@ local function generate_lines(functions, width, active_offsets, cursor_line)
       
       if r.kind == "var" then
         is_active = is_active_offset(r.offset)
-        local offset_str = string.format("[rbp-%d]", r.offset)
         local size_str = format_bytes(r.size)
         local type_str = r.vtype ~= "unknown" and r.vtype or ""
         
-        table.insert(info_lines, string.format("%s • %s", offset_str, size_str))
+        -- For C/C++, show variable name; for assembly, show offset
+        local var_label
+        if r.name then
+          var_label = r.name
+        else
+          var_label = string.format("[rbp-%d]", r.offset)
+        end
+        
+        table.insert(info_lines, string.format("%s • %s", var_label, size_str))
         if type_str ~= "" then table.insert(info_lines, type_str) end
         
         -- Show specific error types with distinct markers (no emojis)
@@ -938,7 +1324,14 @@ function M.refresh()
   end
   
   local lines = vim.api.nvim_buf_get_lines(source_buf, 0, -1, false)
-  local functions, line_map = parse_assembly(lines)
+  
+  -- Use appropriate parser based on filetype
+  local functions, line_map
+  if source_filetype == "c" or source_filetype == "cpp" then
+    functions, line_map = parse_c_cpp(lines)
+  else
+    functions, line_map = parse_assembly(lines)
+  end
   
   if vim.tbl_count(functions) == 0 then return end
   
@@ -1017,7 +1410,12 @@ function M.show_tooltip()
   
   -- Get the line content to find errors
   local lines = vim.api.nvim_buf_get_lines(source_buf, 0, -1, false)
-  local functions, _ = parse_assembly(lines)
+  local functions, _
+  if source_filetype == "c" or source_filetype == "cpp" then
+    functions, _ = parse_c_cpp(lines)
+  else
+    functions, _ = parse_assembly(lines)
+  end
   
   -- Find errors for this line
   local error_msgs = {}
@@ -1046,12 +1444,21 @@ function M.show()
   local current_buf = vim.api.nvim_get_current_buf()
   local filename = vim.api.nvim_buf_get_name(current_buf)
   
+  -- Detect supported file types
   if filename:match("%.asm$") or filename:match("%.s$") then
     source_buf = current_buf
+    source_filetype = "asm"
+  elseif filename:match("%.c$") or filename:match("%.h$") then
+    source_buf = current_buf
+    source_filetype = "c"
+  elseif filename:match("%.cpp$") or filename:match("%.cc$") or filename:match("%.cxx$") 
+         or filename:match("%.hpp$") or filename:match("%.hxx$") or filename:match("%.C$") then
+    source_buf = current_buf
+    source_filetype = "cpp"
   end
   
   if not source_buf then
-    vim.notify("No assembly file selected", vim.log.levels.WARN)
+    vim.notify("No supported file selected (asm, c, cpp)", vim.log.levels.WARN)
     return
   end
   
